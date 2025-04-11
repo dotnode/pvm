@@ -7,6 +7,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"strings"
 	"time"
 )
 
@@ -115,9 +117,47 @@ func listVersions() {
 	}
 }
 
+func getLatestVersion(majorMinor string) (string, error) {
+	// 获取目录列表
+	resp, err := http.Get(phpBaseURL)
+	if err != nil {
+		return "", fmt.Errorf("获取版本列表失败: %v", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("读取版本列表失败: %v", err)
+	}
+
+	// 使用正则表达式匹配版本号
+	pattern := fmt.Sprintf(`php-%s\.\d+-Win32-vc15-x64\.zip`, majorMinor)
+	re := regexp.MustCompile(pattern)
+	matches := re.FindAllString(string(body), -1)
+
+	if len(matches) == 0 {
+		return "", fmt.Errorf("未找到版本 %s 的下载文件", majorMinor)
+	}
+
+	// 提取版本号
+	version := matches[0]
+	version = strings.TrimPrefix(version, "php-")
+	version = strings.TrimSuffix(version, "-Win32-vc15-x64.zip")
+
+	return version, nil
+}
+
 func downloadPHP(version string) error {
+	// 获取完整版本号
+	fullVersion, err := getLatestVersion(version)
+	if err != nil {
+		return err
+	}
+
+	fmt.Printf("找到最新版本: %s\n", fullVersion)
+
 	// 构建下载 URL
-	url := fmt.Sprintf("%sphp-%s-Win32-VC15-x64.zip", phpBaseURL, version)
+	url := fmt.Sprintf("%sphp-%s-Win32-vc15-x64.zip", phpBaseURL, fullVersion)
 	
 	// 创建下载目录
 	downloadDir := filepath.Join(os.TempDir(), "pvm")
@@ -133,11 +173,21 @@ func downloadPHP(version string) error {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("下载失败，状态码: %d", resp.StatusCode)
+		// 尝试 NTS 版本
+		url = fmt.Sprintf("%sphp-%s-nts-Win32-vc15-x64.zip", phpBaseURL, fullVersion)
+		resp, err = http.Get(url)
+		if err != nil {
+			return fmt.Errorf("下载失败: %v", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			return fmt.Errorf("下载失败，状态码: %d", resp.StatusCode)
+		}
 	}
 
 	// 保存文件
-	out, err := os.Create(filepath.Join(downloadDir, fmt.Sprintf("php-%s.zip", version)))
+	out, err := os.Create(filepath.Join(downloadDir, fmt.Sprintf("php-%s.zip", fullVersion)))
 	if err != nil {
 		return fmt.Errorf("创建文件失败: %v", err)
 	}
