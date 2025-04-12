@@ -15,6 +15,7 @@ import (
 
 const (
 	phpBaseURL = "https://windows.php.net/downloads/releases/archives/"
+	phpNewURL  = "https://windows.php.net/downloads/releases/"
 )
 
 func init() {
@@ -40,9 +41,10 @@ func main() {
 	// 如果没有参数，执行默认的更新操作
 	if len(args) == 0 {
 		fmt.Println("使用说明：")
-		fmt.Println("  pvm list - 列出所有版本")
+		fmt.Println("  pvm list - 列出所有已安装的版本")
 		fmt.Println("  pvm install <版本> - 安装指定版本")
 		fmt.Println("  pvm use <版本> - 切换到指定版本")
+		fmt.Println("  pvm check - 查看PHP官网上可用的版本")
 		fmt.Println("  pvm - 显示帮助信息")
 		return
 	}
@@ -54,20 +56,25 @@ func main() {
 	case "install":
 		if len(args) < 2 {
 			fmt.Println("请指定要安装的版本，例如：pvm install 7.4")
+			fmt.Println("您可以使用 pvm check 命令查看可用的版本")
 			return
 		}
 		installVersion(args[1])
 	case "use":
 		if len(args) < 2 {
 			fmt.Println("请指定要使用的版本，例如：pvm use 7.4")
+			fmt.Println("您可以使用 pvm list 命令查看已安装的版本")
 			return
 		}
 		useVersion(args[1])
+	case "check":
+		checkAvailableVersions()
 	default:
 		fmt.Println("未知命令。可用命令：")
-		fmt.Println("  pvm list - 列出所有版本")
+		fmt.Println("  pvm list - 列出所有已安装的版本")
 		fmt.Println("  pvm install <版本> - 安装指定版本")
 		fmt.Println("  pvm use <版本> - 切换到指定版本")
+		fmt.Println("  pvm check - 查看PHP官网上可用的版本")
 	}
 }
 
@@ -226,6 +233,18 @@ func getLatestVersion(majorMinor string) (string, error) {
 		fmt.Sprintf(`php-%s\.\d+-nts-Win32-vc15-x64\.zip`, majorMinor),
 		fmt.Sprintf(`php-%s\.\d+-nts-Win32-vc16-x64\.zip`, majorMinor),
 		fmt.Sprintf(`php-%s\.\d+-nts-Win32-vs16-x64\.zip`, majorMinor),
+		fmt.Sprintf(`php-%s\.\d+-nts-Win32-vs17-x64\.zip`, majorMinor),
+		fmt.Sprintf(`php-%s\.\d+-Win32-vs17-x64\.zip`, majorMinor),
+		fmt.Sprintf(`php-%s\.\d+-Win32-vs16-x64\.zip`, majorMinor),
+		fmt.Sprintf(`php-%s\.\d+-Win32-vs17-x64\.zip`, majorMinor),
+		fmt.Sprintf(`php-%s-Win32-vc15-x64\.zip`, majorMinor), // 添加没有微版本的模式
+		fmt.Sprintf(`php-%s-Win32-vc16-x64\.zip`, majorMinor),
+		fmt.Sprintf(`php-%s-Win32-vs16-x64\.zip`, majorMinor),
+		fmt.Sprintf(`php-%s-Win32-vs17-x64\.zip`, majorMinor),
+		fmt.Sprintf(`php-%s-nts-Win32-vc15-x64\.zip`, majorMinor),
+		fmt.Sprintf(`php-%s-nts-Win32-vc16-x64\.zip`, majorMinor),
+		fmt.Sprintf(`php-%s-nts-Win32-vs16-x64\.zip`, majorMinor),
+		fmt.Sprintf(`php-%s-nts-Win32-vs17-x64\.zip`, majorMinor),
 	}
 
 	var matches []string
@@ -236,7 +255,14 @@ func getLatestVersion(majorMinor string) (string, error) {
 	}
 
 	if len(matches) == 0 {
-		return "", fmt.Errorf("未找到版本 %s 的下载文件", majorMinor)
+		// 尝试搜索当前PHP版本信息
+		tryOtherVersions := fmt.Sprintf(`查找版本 %s 失败。
+尝试以下操作:
+1. 检查版本号是否正确，例如使用 "8.2" 而不是 "8.4"
+2. 如果是最新版本，检查是否需要完整版本号，例如 "8.2.0" 而不是 "8.2"
+3. 使用 "pvm list" 命令查看已安装的版本
+4. 访问 https://windows.php.net/download 查看可用的版本`, majorMinor)
+		return "", fmt.Errorf(tryOtherVersions)
 	}
 
 	// 提取版本号（使用第一个匹配项）
@@ -245,9 +271,11 @@ func getLatestVersion(majorMinor string) (string, error) {
 	version = strings.TrimSuffix(version, "-Win32-vc15-x64.zip")
 	version = strings.TrimSuffix(version, "-Win32-vc16-x64.zip")
 	version = strings.TrimSuffix(version, "-Win32-vs16-x64.zip")
+	version = strings.TrimSuffix(version, "-Win32-vs17-x64.zip")
 	version = strings.TrimSuffix(version, "-nts-Win32-vc15-x64.zip")
 	version = strings.TrimSuffix(version, "-nts-Win32-vc16-x64.zip")
 	version = strings.TrimSuffix(version, "-nts-Win32-vs16-x64.zip")
+	version = strings.TrimSuffix(version, "-nts-Win32-vs17-x64.zip")
 
 	return version, nil
 }
@@ -263,6 +291,17 @@ func downloadPHP(version string) (string, string, error) {
 
 	// 尝试不同的下载 URL 格式
 	urls := []string{
+		// 从发布目录下载
+		fmt.Sprintf("%sphp-%s-Win32-vc15-x64.zip", phpNewURL, fullVersion),
+		fmt.Sprintf("%sphp-%s-Win32-vc16-x64.zip", phpNewURL, fullVersion),
+		fmt.Sprintf("%sphp-%s-Win32-vs16-x64.zip", phpNewURL, fullVersion),
+		fmt.Sprintf("%sphp-%s-Win32-vs17-x64.zip", phpNewURL, fullVersion),
+		fmt.Sprintf("%sphp-%s-nts-Win32-vc15-x64.zip", phpNewURL, fullVersion),
+		fmt.Sprintf("%sphp-%s-nts-Win32-vc16-x64.zip", phpNewURL, fullVersion),
+		fmt.Sprintf("%sphp-%s-nts-Win32-vs16-x64.zip", phpNewURL, fullVersion),
+		fmt.Sprintf("%sphp-%s-nts-Win32-vs17-x64.zip", phpNewURL, fullVersion),
+
+		// 从归档目录下载
 		fmt.Sprintf("%sphp-%s-Win32-vc15-x64.zip", phpBaseURL, fullVersion),
 		fmt.Sprintf("%sphp-%s-Win32-vc16-x64.zip", phpBaseURL, fullVersion),
 		fmt.Sprintf("%sphp-%s-Win32-vs16-x64.zip", phpBaseURL, fullVersion),
@@ -295,7 +334,7 @@ func downloadPHP(version string) (string, string, error) {
 	}
 
 	if successfulURL == "" {
-		return "", "", fmt.Errorf("下载失败，未找到可用的下载链接")
+		return "", "", fmt.Errorf("下载失败，未找到可用的下载链接。\n请访问 https://windows.php.net/download 查看可用的PHP版本。")
 	}
 	defer resp.Body.Close()
 
@@ -765,4 +804,67 @@ func getCurrentVersion() string {
 	}
 
 	return ""
+}
+
+// 检查PHP官网上可用的版本
+func checkAvailableVersions() {
+	fmt.Println("正在查询PHP可用版本信息...")
+
+	// 获取最新版本目录
+	resp, err := http.Get(phpNewURL)
+	if err != nil {
+		fmt.Printf("获取版本列表失败: %v\n", err)
+		return
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		fmt.Printf("读取版本列表失败: %v\n", err)
+		return
+	}
+
+	// 查找所有版本号
+	reVersion := regexp.MustCompile(`php-(\d+\.\d+\.\d+)-`)
+	matches := reVersion.FindAllStringSubmatch(string(body), -1)
+
+	if len(matches) == 0 {
+		fmt.Println("未找到可用的PHP版本信息")
+		fmt.Println("请访问 https://windows.php.net/download 查看可用的PHP版本")
+		return
+	}
+
+	// 用于去重的map
+	versions := make(map[string]bool)
+	for _, match := range matches {
+		if len(match) > 1 {
+			versions[match[1]] = true
+		}
+	}
+
+	// 输出所有可用版本
+	fmt.Println("在PHP官网上找到以下可用版本:")
+
+	// 按主版本号分类
+	majorVersions := make(map[string][]string)
+	for version := range versions {
+		parts := strings.Split(version, ".")
+		if len(parts) >= 2 {
+			majorVersion := parts[0] + "." + parts[1]
+			majorVersions[majorVersion] = append(majorVersions[majorVersion], version)
+		}
+	}
+
+	// 按主版本号排序输出
+	for majorVersion, subVersions := range majorVersions {
+		fmt.Printf("PHP %s 系列:\n", majorVersion)
+		for _, version := range subVersions {
+			fmt.Printf("  - %s\n", version)
+		}
+		fmt.Println()
+	}
+
+	fmt.Println("提示: 安装时可以使用简化版本号，例如:")
+	fmt.Println("  pvm install 8.2 - 会安装8.2系列的最新版本")
+	fmt.Println("  pvm install 8.2.0 - 会精确安装8.2.0版本")
 }
