@@ -117,11 +117,17 @@ func updateProgram() {
 func getPHPHome() (string, error) {
 	// 使用固定的 PHP 安装目录
 	phpsDir := "D:\\app\\pvm\\phps"
+	phpHomeDir := "D:\\app\\pvm\\php_home"
 
 	// 创建 phps 目录
 	fmt.Printf("使用 PHP 目录: %s\n", phpsDir)
 	if err := os.MkdirAll(phpsDir, 0755); err != nil {
 		return "", fmt.Errorf("创建 phps 目录失败: %v", err)
+	}
+
+	// 创建 php_home 目录
+	if err := os.MkdirAll(phpHomeDir, 0755); err != nil {
+		return "", fmt.Errorf("创建 php_home 目录失败: %v", err)
 	}
 
 	return phpsDir, nil
@@ -406,81 +412,73 @@ func updatePATH(phpHome string) error {
 		fmt.Println("无法从注册表获取系统 PATH，使用当前会话的 PATH 作为备用")
 	}
 
-	// 检查 PHP 目录是否已经在 PATH 中的首位
+	// 符号链接目标目录
+	phpHomeDir := "D:\\app\\pvm\\php_home"
+
+	// 检查 PHP 目录是否已经在 PATH 中
+	phpInPath := false
 	paths := strings.Split(path, ";")
-	if len(paths) > 0 && strings.EqualFold(paths[0], phpHome) {
-		fmt.Printf("PHP 目录已在系统 PATH 首位: %s\n", phpHome)
-		return nil
-	}
-
-	fmt.Printf("更新系统 PATH 环境变量...\n")
-	fmt.Printf("将 %s 设置为系统 PATH 首位\n", phpHome)
-
-	// 移除其他 PHP 目录
-	newPaths := []string{phpHome}
 	for _, p := range paths {
-		// 如果路径不包含 php 或者就是当前 PHP 目录，保留
-		if !strings.Contains(strings.ToLower(p), "php") || strings.EqualFold(p, phpHome) {
-			if p != "" && !strings.EqualFold(p, phpHome) {
-				newPaths = append(newPaths, p)
-			}
+		if strings.EqualFold(p, phpHomeDir) {
+			phpInPath = true
+			fmt.Printf("PHP 目录已在系统 PATH 中: %s\n", phpHomeDir)
+			break
 		}
 	}
 
-	// 构建新的 PATH
-	newPath := strings.Join(newPaths, ";")
+	if !phpInPath {
+		fmt.Printf("更新系统 PATH 环境变量...\n")
+		fmt.Printf("将 %s 添加到系统 PATH\n", phpHomeDir)
 
-	fmt.Println("以管理员权限设置系统 PATH 环境变量...")
+		// 构建新的 PATH（添加到开头）
+		newPath := phpHomeDir
+		if path != "" {
+			newPath = newPath + ";" + path
+		}
 
-	// 创建批处理文件来设置系统环境变量
-	batFile := filepath.Join(os.TempDir(), "pvm_setenv.bat")
-	batContent := fmt.Sprintf(`@echo off
-echo 正在设置系统 PATH 环境变量...
+		fmt.Println("以管理员权限设置系统 PATH 环境变量...")
+
+		// 创建批处理文件来设置系统环境变量
+		batFile := filepath.Join(os.TempDir(), "pvm_setenv.bat")
+		batContent := fmt.Sprintf(`@echo off
+echo Setting system PATH environment variable...
 setx PATH "%s" /M
-IF %ERRORLEVEL% NEQ 0 (
-    echo 错误: 设置系统环境变量失败！
+IF %%ERRORLEVEL%% NEQ 0 (
+    echo Error: Failed to set system environment variable!
     pause
     exit /b 1
 )
-echo 系统环境变量已更新!
+echo System environment variable updated!
 `, newPath)
 
-	if err := os.WriteFile(batFile, []byte(batContent), 0644); err != nil {
-		return fmt.Errorf("创建批处理文件失败: %v", err)
-	}
+		if err := os.WriteFile(batFile, []byte(batContent), 0644); err != nil {
+			return fmt.Errorf("创建批处理文件失败: %v", err)
+		}
 
-	// 使用 PowerShell 以管理员权限运行批处理文件
-	fmt.Printf("请在弹出的 UAC 提示中选择\"是\"\n")
-	psCmd := fmt.Sprintf(`Start-Process -FilePath "%s" -Verb RunAs -Wait`, batFile)
-	cmd = exec.Command("powershell", "-Command", psCmd)
-	output, err = cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("更新系统 PATH 环境变量失败: %v, 输出: %s", err, string(output))
-	}
+		// 使用 PowerShell 以管理员权限运行批处理文件
+		fmt.Printf("请在弹出的 UAC 提示中选择\"是\"\n")
+		psCmd := fmt.Sprintf(`Start-Process -FilePath "%s" -Verb RunAs -Wait`, batFile)
+		cmd = exec.Command("powershell", "-Command", psCmd)
+		output, err = cmd.CombinedOutput()
+		if err != nil {
+			return fmt.Errorf("更新系统 PATH 环境变量失败: %v, 输出: %s", err, string(output))
+		}
 
-	fmt.Printf("系统 PATH 环境变量已永久更新!\n")
+		fmt.Printf("系统 PATH 环境变量已永久更新!\n")
+	}
 
 	// 创建用于在当前窗口直接运行的批处理文件
 	fmt.Println("为当前会话创建临时环境变量更新脚本...")
 	currSessionBat := filepath.Join(os.TempDir(), "pvm_current_session.bat")
 	currSessionContent := fmt.Sprintf(`@echo off
-echo 正在为当前会话修改 PATH 环境变量...
-setlocal EnableDelayedExpansion
-set "ORIG_PATH=%%PATH%%"
-where php > nul 2>&1
-if !ERRORLEVEL! EQU 0 (
-    for /f "tokens=*" %%i in ('where php') do echo 当前 PHP 路径: %%i
-)
-
-echo 设置新 PATH: %s;%%PATH%%
+echo Setting PATH environment variable for current session...
 set "PATH=%s;%%PATH%%"
-echo ===================================
-echo 验证当前 PHP 版本:
+echo Current PHP version:
 php -v
-echo ===================================
-echo 按任意键继续...
+echo.
+echo Press any key to continue...
 pause > nul
-`, phpHome, phpHome)
+`, phpHomeDir)
 
 	if err := os.WriteFile(currSessionBat, []byte(currSessionContent), 0644); err != nil {
 		fmt.Printf("警告: 创建当前会话环境变量更新文件失败: %v\n", err)
@@ -493,10 +491,10 @@ pause > nul
 		launchContent := fmt.Sprintf(`@echo off
 cd /d "%s"
 set "PATH=%s;%%PATH%%"
-echo PHP 环境已设置为 %s
+echo PHP environment set to %s
 echo.
 php -v
-`, phpHome, phpHome, filepath.Base(phpHome))
+`, phpHome, phpHomeDir, filepath.Base(phpHome))
 
 		if err := os.WriteFile(batLauncher, []byte(launchContent), 0644); err != nil {
 			fmt.Printf("警告: 创建启动脚本失败: %v\n", err)
@@ -779,13 +777,198 @@ func useVersion(version string) {
 		}
 	}
 
-	// 更新 PATH 环境变量
+	// PHP_HOME 目录路径
+	phpHomeDir := "D:\\app\\pvm\\php_home"
+
+	// 清理现有的PHP_HOME目录
+	fmt.Printf("清理目录: %s\n", phpHomeDir)
+	if err := os.RemoveAll(phpHomeDir); err != nil {
+		fmt.Printf("警告: 无法删除旧目录: %v，尝试清空目录内容\n", err)
+
+		// 尝试清空目录内容
+		if err := removeContents(phpHomeDir); err != nil {
+			fmt.Printf("警告: 无法清空目录内容: %v\n", err)
+		}
+	}
+
+	// 等待1秒，确保文件系统操作完成
+	time.Sleep(1 * time.Second)
+
+	// 创建新的空目录
+	fmt.Printf("创建新目录: %s\n", phpHomeDir)
+	if err := os.MkdirAll(phpHomeDir, 0755); err != nil {
+		fmt.Printf("创建目录失败: %v，尝试使用其他方法\n", err)
+		return
+	}
+
+	// 使用手动文件复制方法而不是xcopy
+	fmt.Printf("正在将PHP文件从 %s 复制到 %s\n", versionDir, phpHomeDir)
+
+	// 枚举源目录中的所有文件
+	err = copyDirectory(versionDir, phpHomeDir)
+	if err != nil {
+		fmt.Printf("复制文件失败: %v\n", err)
+		fmt.Println("尝试使用robocopy命令...")
+
+		// 如果Go的文件复制方法失败，尝试使用robocopy命令
+		robocopyCmd := exec.Command("robocopy", versionDir, phpHomeDir, "/E", "/NFL", "/NDL")
+		output, err := robocopyCmd.CombinedOutput()
+		if err != nil {
+			// robocopy的返回码不是标准的0=成功，需要特殊处理
+			exitCode := robocopyCmd.ProcessState.ExitCode()
+			if exitCode >= 8 {
+				fmt.Printf("robocopy失败，返回码: %d, 输出: %s\n", exitCode, string(output))
+
+				// 最后尝试使用批处理文件进行复制
+				fmt.Println("尝试使用批处理文件进行复制...")
+				copyBat := filepath.Join(os.TempDir(), "pvm_copy.bat")
+				copyContent := fmt.Sprintf(`@echo off
+echo 正在复制PHP文件...
+md "%s" 2>nul
+xcopy "%s\*.*" "%s\" /E /I /Y
+if errorlevel 1 (
+  echo 复制失败
+  exit /b 1
+)
+echo 复制成功
+`, phpHomeDir, versionDir, phpHomeDir)
+
+				if err := os.WriteFile(copyBat, []byte(copyContent), 0644); err != nil {
+					fmt.Printf("创建复制批处理文件失败: %v\n", err)
+					return
+				}
+
+				copyCmd := exec.Command("cmd", "/C", copyBat)
+				output, err = copyCmd.CombinedOutput()
+				if err != nil {
+					fmt.Printf("批处理复制失败: %v, 输出: %s\n", err, string(output))
+					return
+				}
+			}
+		}
+	}
+
+	fmt.Println("文件复制成功")
+
+	// 创建一个批处理文件，用于在需要时刷新环境变量
+	refreshBat := filepath.Join(phpHomeDir, "refresh_env.bat")
+	refreshContent := fmt.Sprintf(`@echo off
+echo 当前PHP版本: %s
+php -v
+`, version)
+	if err := os.WriteFile(refreshBat, []byte(refreshContent), 0644); err != nil {
+		fmt.Printf("警告: 创建刷新脚本失败: %v\n", err)
+	}
+
+	// 更新 PATH 环境变量（只添加php_home目录）
 	if err := updatePATH(versionDir); err != nil {
 		fmt.Printf("警告: %v\n", err)
 	} else {
 		fmt.Printf("已成功切换到版本 %s\n", version)
-		fmt.Printf("环境变量已更新，当前会话和未来会话都将使用 PHP %s\n", version)
+		fmt.Printf("环境变量已设置，当前会话和未来会话都将使用 PHP %s\n", version)
 	}
+}
+
+// 使用Go原生函数复制目录
+func copyDirectory(src, dst string) error {
+	// 获取源目录信息
+	srcInfo, err := os.Stat(src)
+	if err != nil {
+		return err
+	}
+
+	// 创建目标目录
+	if err = os.MkdirAll(dst, srcInfo.Mode()); err != nil {
+		return err
+	}
+
+	// 读取源目录内容
+	entries, err := os.ReadDir(src)
+	if err != nil {
+		return err
+	}
+
+	// 复制每个文件或子目录
+	for _, entry := range entries {
+		srcPath := filepath.Join(src, entry.Name())
+		dstPath := filepath.Join(dst, entry.Name())
+
+		if entry.IsDir() {
+			// 递归复制子目录
+			if err = copyDirectory(srcPath, dstPath); err != nil {
+				fmt.Printf("复制目录 %s 失败: %v\n", srcPath, err)
+				return err
+			}
+		} else {
+			// 复制文件
+			if err = copyFile(srcPath, dstPath); err != nil {
+				fmt.Printf("复制文件 %s 失败: %v\n", srcPath, err)
+				return err
+			}
+		}
+	}
+
+	return nil
+}
+
+// 复制单个文件
+func copyFile(src, dst string) error {
+	// 打开源文件
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+
+	// 创建目标文件
+	out, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+
+	// 复制内容
+	_, err = io.Copy(out, in)
+	if err != nil {
+		return err
+	}
+
+	// 刷新缓冲区
+	err = out.Sync()
+	if err != nil {
+		return err
+	}
+
+	// 复制文件权限
+	srcInfo, err := os.Stat(src)
+	if err != nil {
+		return err
+	}
+
+	return os.Chmod(dst, srcInfo.Mode())
+}
+
+// 移除目录中的所有内容但保留目录本身
+func removeContents(dir string) error {
+	d, err := os.Open(dir)
+	if err != nil {
+		return err
+	}
+	defer d.Close()
+
+	names, err := d.Readdirnames(-1)
+	if err != nil {
+		return err
+	}
+
+	for _, name := range names {
+		err = os.RemoveAll(filepath.Join(dir, name))
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 func getCurrentVersion() string {
